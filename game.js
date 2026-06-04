@@ -131,6 +131,21 @@ function update(dt) {
     const currentSegment = segments[currentSegmentIndex];
     playerX -= (speed / maxSpeed) * currentSegment.curve * 0.01;
 
+    // --- DIFICULTAD DINÁMICA: Generar obstáculos justo delante de la vista ---
+    if (currentSegmentIndex !== lastSegmentIndex) {
+        let futureIndex = (currentSegmentIndex + drawDistance) % totalTrackLength;
+        // La probabilidad arranca en 10% (0.10) y sube hasta 35% (0.35) a los 1500 puntos
+        let probability = 0.10 + Math.min(score / 1500, 1) * 0.25;
+        
+        if (Math.random() < probability) {
+            segments[futureIndex].obstacle = (Math.random() * 2) - 1;
+        } else {
+            segments[futureIndex].obstacle = null;
+        }
+        lastSegmentIndex = currentSegmentIndex;
+    }
+    // -------------------------------------------------------------------------
+
     // Detección de Colisión con Obstáculos
     if (currentSegment.obstacle !== null) {
         // Si el coche está en el mismo segmento y cerca del obstáculo (X)
