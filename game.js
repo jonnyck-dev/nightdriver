@@ -49,7 +49,7 @@ function project(p, cameraX, cameraY, cameraZ) {
         y: (p.world.y || 0) - cameraY,
         z: (p.world.z || 0) - cameraZ
     };
-    const scale = cameraDepth / p.camera.z;
+    const scale = cameraDepth / (p.camera.z || 1); // Evitar división por cero
     p.screen.x = Math.round((canvas.width / 2) + (scale * p.camera.x * canvas.width / 2));
     p.screen.y = Math.round((canvas.height / 2) - (scale * p.camera.y * canvas.height / 2));
     p.screen.w = Math.round(scale * roadWidth * canvas.width / 2);
@@ -204,6 +204,10 @@ function gameLoop() {
     update();
     draw();
     requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+mationFrame(gameLoop);
 }
 
 gameLoop();
