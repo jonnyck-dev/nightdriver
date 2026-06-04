@@ -72,6 +72,33 @@ function initAudio() {
     }
 }
 
+function playCrashSound() {
+    if (!audioInitialized || !audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    // Generar ruido blanco para el choque
+    const bufferSize = audioCtx.sampleRate * 0.2;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+    
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = buffer;
+    
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.value = 1000;
+    
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+    
+    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+    noise.start();
+    noise.stop(audioCtx.currentTime + 0.2);
+}
+
 function updateAudio(currentSpeed, maxSpeedValue) {
     if (!audioInitialized || !audioCtx) return;
     
