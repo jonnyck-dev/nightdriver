@@ -11,6 +11,79 @@ const drawDistance = 200;
 const cameraDepth = 1 / Math.tan((80 / 2) * Math.PI / 180);
 const totalTrackLength = 1000;
 
+// --- SISTEMA DE AUDIO PROCEDURAL (Web Audio API) ---
+const AudioContext = window.AudioContext || window.webkitAudioContext;
+let audioCtx;
+let engineOsc;
+let engineGain;
+let audioInitialized = false;
+
+function initAudio() {
+    if (audioInitialized) return;
+    try {
+        audioCtx = new AudioContext();
+        
+        // 1. Sonido de Motor (Diente de sierra + Filtro Pasa-bajos)
+        engineOsc = audioCtx.createOscillator();
+        engineOsc.type = 'sawtooth';
+        engineOsc.frequency.value = 60; // Frecuencia base (ralentí)
+        
+        engineGain = audioCtx.createGain();
+        engineGain.gain.value = 0; // Silenciado hasta iniciar
+        
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 350; // Frecuencia de corte para sonido ronco
+        
+        engineOsc.connect(filter);
+        filter.connect(engineGain);
+        engineGain.connect(audioCtx.destination);
+        engineOsc.start();
+        
+        // 2. Música de Fondo 8-Bit (Arpegio Synthwave)
+        const notes = [220.00, 261.63, 329.63, 440.00, 261.63, 329.63, 392.00, 523.25];
+        let noteIdx = 0;
+        
+        setInterval(() => {
+            if (!gameActive || audioCtx.state !== 'running') return;
+            
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(notes[noteIdx], audioCtx.currentTime);
+            
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            // Envolvente de sonido "Plucky"
+            gain.gain.setValueAtTime(0.03, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+            
+            osc.start(audioCtx.currentTime);
+            osc.stop(audioCtx.currentTime + 0.15);
+            
+            noteIdx = (noteIdx + 1) % notes.length;
+        }, 125);
+        
+        audioInitialized = true;
+    } catch (e) {
+        console.error("Audio Initialization failed:", e);
+    }
+}
+
+function updateAudio(currentSpeed, maxSpeedValue) {
+    if (!audioInitialized || !audioCtx) return;
+    
+    if (gameActive) {
+        engineOsc.frequency.setTargetAtTime(50 + (currentSpeed / maxSpeedValue) * 150, audioCtx.currentTime, 0.1);
+        engineGain.gain.setTargetAtTime(0.05 + (currentSpeed / maxSpeedValue) * 0.15, audioCtx.currentTime, 0.1);
+    } else {
+        engineGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
+    }
+}
+// ---------------------------------------------------
+
 let segments = [];
 let playerX = 0;
 let position = 0;
@@ -23,6 +96,7 @@ let offRoadDecel = -10;
 let gameActive = false;
 let score = 0;
 let highScore = localStorage.getItem('nightdriver_highscore') || 0;
+let lastSegmentIndex = 0;
 
 const keys = {};
 document.addEventListener('keydown', e => keys[e.code] = true);
@@ -31,17 +105,14 @@ document.addEventListener('keyup', e => keys[e.code] = false);
 function resetTrack() {
     segments = [];
     for (let n = 0; n < totalTrackLength; n++) {
-        // Añadir curvas
         let curve = 0;
         if (n > 50 && n < 150) curve = 2;
         else if (n > 200 && n < 300) curve = -3;
         else if (n > 400 && n < 600) curve = 4;
         else if (n > 700 && n < 900) curve = -4;
 
-        // Añadir obstáculos de forma aleatoria (no en la salida)
         let obstacle = null;
-        if (n > 100 && Math.random() < 0.05) {
-            // Posición del obstáculo: -0.5 (izquierda), 0 (centro), 0.5 (derecha)
+        if (n > 50 && n < drawDistance && Math.random() < 0.10) {
             obstacle = (Math.random() * 2) - 1; 
         }
 
@@ -70,22 +141,26 @@ function project(p, cameraX, cameraY, cameraZ) {
 }
 
 function initGame() {
+    initAudio();
+    if(audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+
     position = 0;
     speed = 0;
     playerX = 0;
     score = 0;
+    lastSegmentIndex = 0;
     gameActive = true;
-    maxSpeed = 300; // Resetear dificultad
+    maxSpeed = 300; 
     resetTrack();
     
-    // Actualizar High Score visual
     document.getElementById('highscore').innerText = `HIGH SCORE: ${Math.floor(highScore).toString().padStart(4, '0')}`;
 }
 
 function endGame() {
     gameActive = false;
     
-    // Guardar High Score
     if (score > highScore) {
         highScore = score;
         localStorage.setItem('nightdriver_highscore', highScore);
@@ -99,21 +174,20 @@ function endGame() {
 }
 
 function update(dt) {
-    if (!gameActive) return;
+    if (!gameActive) {
+        updateAudio(0, maxSpeed);
+        return;
+    }
 
-    // Aceleración y Frenado
     if (keys['ArrowUp']) speed += accel;
     else if (keys['ArrowDown']) speed += breaking;
     else speed += decel;
 
-    // Aumentar la velocidad máxima poco a poco (dificultad progresiva)
     maxSpeed += 0.05;
 
-    // Manejo de giro
     if (keys['ArrowLeft']) playerX -= 0.05 * (speed / maxSpeed);
     if (keys['ArrowRight']) playerX += 0.05 * (speed / maxSpeed);
 
-    // Salirse de la carretera te frena mucho
     if (Math.abs(playerX) > 1) {
         if (speed > 50) speed += offRoadDecel;
     }
@@ -121,20 +195,16 @@ function update(dt) {
     speed = Math.max(0, Math.min(speed, maxSpeed));
     position += speed;
 
-    // Pista Infinita (Loop)
     if (position >= totalTrackLength * segmentLength) {
         position -= totalTrackLength * segmentLength;
     }
 
-    // Curvatura de la carretera
     const currentSegmentIndex = Math.floor(position / segmentLength) % totalTrackLength;
     const currentSegment = segments[currentSegmentIndex];
     playerX -= (speed / maxSpeed) * currentSegment.curve * 0.01;
 
-    // --- DIFICULTAD DINÁMICA: Generar obstáculos justo delante de la vista ---
     if (currentSegmentIndex !== lastSegmentIndex) {
         let futureIndex = (currentSegmentIndex + drawDistance) % totalTrackLength;
-        // La probabilidad arranca en 10% (0.10) y sube hasta 35% (0.35) a los 1500 puntos
         let probability = 0.10 + Math.min(score / 1500, 1) * 0.25;
         
         if (Math.random() < probability) {
@@ -144,29 +214,25 @@ function update(dt) {
         }
         lastSegmentIndex = currentSegmentIndex;
     }
-    // -------------------------------------------------------------------------
 
-    // Detección de Colisión con Obstáculos
     if (currentSegment.obstacle !== null) {
-        // Si el coche está en el mismo segmento y cerca del obstáculo (X)
         const distanceToObstacle = Math.abs(playerX - currentSegment.obstacle);
-        if (distanceToObstacle < 0.3) { // 0.3 es el "ancho" de la colisión
+        if (distanceToObstacle < 0.3) { 
             endGame();
         }
     }
 
-    // Puntaje progresivo
     if (speed > 10) score += (speed / 100);
 
-    // UI
     document.getElementById('speed').innerText = `VELOCIDAD: ${Math.floor(speed)} KM/H`;
     document.getElementById('score').innerText = `SCORE: ${Math.floor(score).toString().padStart(4, '0')}`;
+    
+    updateAudio(speed, maxSpeed);
 }
 
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Cielo Reactivo
     const skyColor = Math.floor(position / 100) % 2 ? '#001' : '#002';
     ctx.fillStyle = skyColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -193,28 +259,23 @@ function draw() {
         const p1 = segment.p1.screen;
         const p2 = segment.p2.screen;
 
-        // Césped
         ctx.fillStyle = segment.color.grass;
         ctx.fillRect(0, p2.y, canvas.width, p1.y - p2.y);
 
-        // Bordes neón
         const rumbleW1 = p1.w * 0.1;
         const rumbleW2 = p2.w * 0.1;
         ctx.fillStyle = segment.color.rumble;
         
-        // Izquierda
         ctx.beginPath();
         ctx.moveTo(p1.x - p1.w - rumbleW1, p1.y); ctx.lineTo(p1.x - p1.w, p1.y);
         ctx.lineTo(p2.x - p2.w, p2.y); ctx.lineTo(p2.x - p2.w - rumbleW2, p2.y);
         ctx.fill();
         
-        // Derecha
         ctx.beginPath();
         ctx.moveTo(p1.x + p1.w + rumbleW1, p1.y); ctx.lineTo(p1.x + p1.w, p1.y);
         ctx.lineTo(p2.x + p2.w, p2.y); ctx.lineTo(p2.x + p2.w + rumbleW2, p2.y);
         ctx.fill();
 
-        // Carretera
         ctx.fillStyle = segment.color.road;
         ctx.beginPath();
         ctx.moveTo(p1.x - p1.w, p1.y); ctx.lineTo(p1.x + p1.w, p1.y);
@@ -224,17 +285,15 @@ function draw() {
         maxy = p2.y;
     }
 
-    // Dibujar obstáculos en una segunda pasada (para que se vean encima de la carretera)
     for (let n = startPos + drawDistance - 1; n >= startPos; n--) {
         const segment = segments[n % totalTrackLength];
         if (segment.obstacle !== null && segment.p1.camera.z > cameraDepth) {
             const p1 = segment.p1.screen;
-            // Calcular posición X del obstáculo en pantalla
             const obsX = p1.x + (segment.obstacle * p1.w);
-            const obsW = p1.w * 0.2; // Ancho del obstáculo
-            const obsH = p1.w * 0.2; // Alto del obstáculo
+            const obsW = p1.w * 0.2; 
+            const obsH = p1.w * 0.2; 
             
-            ctx.fillStyle = '#ff0055'; // Color del obstáculo
+            ctx.fillStyle = '#ff0055'; 
             ctx.shadowBlur = 10;
             ctx.shadowColor = '#ff0055';
             ctx.fillRect(obsX - obsW / 2, p1.y - obsH, obsW, obsH);
@@ -242,7 +301,6 @@ function draw() {
         }
     }
 
-    // Dibujar Coche
     drawPlayer(canvas.width / 2, canvas.height - 30);
 }
 
@@ -257,7 +315,6 @@ function drawPlayer(x, y) {
     ctx.lineTo(x - 20, y - 40);
     ctx.fill();
     
-    // Luces traseras
     ctx.shadowColor = "#f0f";
     ctx.fillStyle = "#f0f";
     ctx.fillRect(x - 25, y - 10, 15, 5);
