@@ -206,8 +206,6 @@ function gameLoop() {
     requestAnimationFrame(gameLoop);
 }
 
-gameLoop();
-mationFrame(gameLoop);
-}
-
+// Inicialización inmediata para evitar errores de dibujo
+resetTrack();
 gameLoop();
