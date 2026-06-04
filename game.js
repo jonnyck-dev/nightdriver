@@ -74,10 +74,10 @@ function initAudio() {
 
 function playCrashSound() {
     if (!audioInitialized || !audioCtx) return;
-    const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
-    // Generar ruido blanco para el choque
-    const bufferSize = audioCtx.sampleRate * 0.2;
+    
+    // Generar ruido blanco para el choque (0.5 segundos)
+    const bufferSize = audioCtx.sampleRate * 0.5;
     const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
@@ -86,25 +86,37 @@ function playCrashSound() {
     noise.buffer = buffer;
     
     const filter = audioCtx.createBiquadFilter();
-    filter.type = 'highpass';
-    filter.frequency.value = 1000;
+    filter.type = 'lowpass'; // Sonido grave tipo explosión 8-bit
+    filter.frequency.value = 800;
     
     noise.connect(filter);
     filter.connect(gain);
     gain.connect(audioCtx.destination);
     
-    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+    // Volumen alto y decaimiento
+    gain.gain.setValueAtTime(0.6, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
     noise.start();
-    noise.stop(audioCtx.currentTime + 0.2);
+    noise.stop(audioCtx.currentTime + 0.5);
 }
 
 function updateAudio(currentSpeed, maxSpeedValue) {
     if (!audioInitialized || !audioCtx) return;
     
-    if (gameActive) {
-        engineOsc.frequency.setTargetAtTime(50 + (currentSpeed / maxSpeedValue) * 150, audioCtx.currentTime, 0.1);
-        engineGain.gain.setTargetAtTime(0.05 + (currentSpeed / maxSpeedValue) * 0.15, audioCtx.currentTime, 0.1);
+    if (gameActive && !isPaused) {
+        const r = maxSpeedValue > 0 ? (currentSpeed / maxSpeedValue) : 0;
+        const totalGears = 6;
+        const gear = Math.min(totalGears - 1, Math.floor(r * totalGears));
+        const gearMin = gear / totalGears;
+        const gearMax = (gear + 1) / totalGears;
+        const gearProgress = gearMax === gearMin ? 0 : (r - gearMin) / (gearMax - gearMin);
+        
+        // Tonos más contrastantes para simular el cambio de palanca (6 marchas)
+        const baseFreq = 40 + gear * 20; 
+        const targetFreq = baseFreq + gearProgress * 120;
+        
+        engineOsc.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.1);
+        engineGain.gain.setTargetAtTime(0.05 + r * 0.2, audioCtx.currentTime, 0.1);
     } else {
         engineGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
     }
@@ -124,9 +136,16 @@ let gameActive = false;
 let score = 0;
 let highScore = localStorage.getItem('nightdriver_highscore') || 0;
 let lastSegmentIndex = 0;
+let segmentsToNextSpawn = 0;
+let isPaused = false;
 
 const keys = {};
-document.addEventListener('keydown', e => keys[e.code] = true);
+document.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (e.code === 'KeyP') {
+        if (gameActive) isPaused = !isPaused;
+    }
+});
 document.addEventListener('keyup', e => keys[e.code] = false);
 
 function resetTrack() {
@@ -139,9 +158,6 @@ function resetTrack() {
         else if (n > 700 && n < 900) curve = -4;
 
         let obstacle = null;
-        if (n > 50 && n < drawDistance && Math.random() < 0.10) {
-            obstacle = (Math.random() * 2) - 1; 
-        }
 
         segments.push({
             index: n,
@@ -178,6 +194,7 @@ function initGame() {
     playerX = 0;
     score = 0;
     lastSegmentIndex = 0;
+    segmentsToNextSpawn = 10;
     gameActive = true;
     maxSpeed = 300; 
     resetTrack();
@@ -187,6 +204,7 @@ function initGame() {
 
 function endGame() {
     gameActive = false;
+    playCrashSound();
     
     if (score > highScore) {
         highScore = score;
@@ -205,15 +223,20 @@ function update(dt) {
         updateAudio(0, maxSpeed);
         return;
     }
+    
+    if (isPaused) {
+        updateAudio(0, maxSpeed);
+        return;
+    }
 
     if (keys['ArrowUp']) speed += accel;
     else if (keys['ArrowDown']) speed += breaking;
     else speed += decel;
 
-    maxSpeed += 0.05;
-
-    if (keys['ArrowLeft']) playerX -= 0.05 * (speed / maxSpeed);
-    if (keys['ArrowRight']) playerX += 0.05 * (speed / maxSpeed);
+    if (speed > 0) {
+        if (keys['ArrowLeft']) playerX -= 0.05;
+        if (keys['ArrowRight']) playerX += 0.05;
+    }
 
     if (Math.abs(playerX) > 1) {
         if (speed > 50) speed += offRoadDecel;
@@ -231,20 +254,61 @@ function update(dt) {
     playerX -= (speed / maxSpeed) * currentSegment.curve * 0.01;
 
     if (currentSegmentIndex !== lastSegmentIndex) {
-        let futureIndex = (currentSegmentIndex + drawDistance) % totalTrackLength;
-        let probability = 0.10 + Math.min(score / 1500, 1) * 0.25;
-        
-        if (Math.random() < probability) {
-            segments[futureIndex].obstacle = (Math.random() * 2) - 1;
-        } else {
-            segments[futureIndex].obstacle = null;
+        let idx = lastSegmentIndex;
+        while (idx !== currentSegmentIndex) {
+            // Limpiamos el obstáculo del segmento que dejamos atrás
+            segments[idx].obstacle = null;
+
+            idx = (idx + 1) % totalTrackLength;
+            
+            // Comprobamos colisión en segmentos intermedios (por si saltamos alguno a muy alta velocidad)
+            if (idx !== currentSegmentIndex && segments[idx].obstacle !== null) {
+                if (Math.abs(playerX - segments[idx].obstacle) < 0.18) {
+                    endGame();
+                }
+            }
+            
+            let futureIndex = (idx + drawDistance) % totalTrackLength;
+            
+            if (segmentsToNextSpawn > 0) {
+                segmentsToNextSpawn--;
+            } else {
+                let probability = 0.10 + Math.min(score / 1500, 1) * 0.25;
+                if (Math.random() < probability) {
+                    // Decidimos el tamaño del grupo de obstáculos: 1 o 2 carros.
+                    let groupSize = Math.random() < 0.5 ? 1 : 2;
+                    
+                    if (groupSize === 1) {
+                        segments[futureIndex].obstacle = (Math.random() * 1.4) - 0.7; // Colocar en la carretera (-0.7 a 0.7)
+                        // Cooldown de 30 a 45 segmentos para dar un buen radio de aparición
+                        segmentsToNextSpawn = Math.floor(Math.random() * 15) + 30;
+                    } else {
+                        // Grupo de 2 carros: uno a la izquierda y otro a la derecha
+                        let x1 = (Math.random() * 0.6) - 0.7; // Izquierda (-0.7 a -0.1)
+                        let x2 = (Math.random() * 0.6) + 0.1; // Derecha (0.1 a 0.7)
+                        
+                        // Aleatorizar cuál va primero
+                        if (Math.random() < 0.5) {
+                            let temp = x1;
+                            x1 = x2;
+                            x2 = temp;
+                        }
+                        
+                        segments[futureIndex].obstacle = x1;
+                        segments[(futureIndex + 3) % totalTrackLength].obstacle = x2; // El segundo con una pequeña separación de 3 segmentos
+                        
+                        // Cooldown de 45 a 60 segmentos para grupos de 2
+                        segmentsToNextSpawn = Math.floor(Math.random() * 15) + 45;
+                    }
+                }
+            }
         }
         lastSegmentIndex = currentSegmentIndex;
     }
 
     if (currentSegment.obstacle !== null) {
         const distanceToObstacle = Math.abs(playerX - currentSegment.obstacle);
-        if (distanceToObstacle < 0.3) { 
+        if (distanceToObstacle < 0.18) { // 0.10 del obstáculo + 0.08 del ancho del coche para una colisión visualmente exacta
             endGame();
         }
     }
@@ -329,6 +393,16 @@ function draw() {
     }
 
     drawPlayer(canvas.width / 2, canvas.height - 30);
+
+    if (isPaused) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#0ff";
+        ctx.font = "bold 40px 'Courier New', monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("PAUSADO", canvas.width / 2, canvas.height / 2);
+    }
 }
 
 function drawPlayer(x, y) {
