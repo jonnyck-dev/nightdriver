@@ -12,10 +12,10 @@ Este es el repositorio oficial de **NightDriver: Neon Overdrive**, un juego *End
 - **Renderizado:** Basado en segmentos. El mundo se divide en `totalTrackLength = 1000`. La función `project()` convierte coordenadas 3D a 2D basándose en la profundidad (`cameraDepth`).
 - **Bucle de Juego:** `requestAnimationFrame` que separa `update()` (física/lógica) y `draw()` (renderizado).
 - **Pista:** Infinita, mediante el operador módulo sobre la posición del jugador.
-- **Audio:** Sistema procedural de dos capas:
-    - `engineOsc`: Oscilador `sawtooth` filtrado (LowPass) que cambia de frecuencia según la velocidad.
+- **Audio:** Sistema procedural de dos capas con Web Audio API:
+    - `engineOsc`: Oscilador `sawtooth` filtrado (LowPass) que simula **6 marchas/cambios de velocidad**. La frecuencia de revoluciones sube y cae dinámicamente según la velocidad relativa del carro.
     - `Música 8-bit`: Oscilador `square` que reproduce arpegios procedurales mediante `setInterval`.
-    - `playCrashSound()`: Efecto de colisión generado con ruido blanco.
+    - `playCrashSound()`: Efecto de explosión de choque de 8-bits generado con ruido blanco y filtro `lowpass` de 800Hz durante 0.5s.
 
 ## 3. Guía de Integración para el Equipo de Diseño (Sprites)
 
@@ -45,14 +45,19 @@ Dado que es Vanilla JS:
 ---
 
 ## 4. Dificultad Dinámica y Física
-- **Generación de Obstáculos:** Los carros enemigos se generan en grupos de 1 a 3. La probabilidad de aparición es dinámica:
+- **Generación de Obstáculos (Evita Agrupamiento):** Se generan por grupos de 1 o 2 carros con una distancia de enfriamiento (cooldown) de 30-45 segmentos (grupo de 1) o 45-60 segmentos (grupo de 2) para evitar aglomeración. La probabilidad de aparición del grupo es dinámica:
   ```javascript
-  let probability = 0.10 + Math.min(score / 1500, 1) * 0.25;
+  let probability = 0.10 + Math.min(score / 1500, 1) * 0.25; // Rango de 10% a 35%
   ```
-- **Velocidad:** `maxSpeed` aumenta 0.05 por frame.
-- **Colisiones:** Detectadas mediante `Math.abs(playerX - currentSegment.obstacle) < 0.4`.
+- **Velocidad Infinita:** `maxSpeed` se mantiene estable en 300 KM/H para permitir un juego infinito y controlado en base a la habilidad, eliminando la aceleración automática desmedida.
+- **Física de Dirección:** Solo se permite mover el coche de izquierda a derecha cuando el coche está en movimiento (`speed > 0`).
+- **Colisiones Robustas:** Detectadas mediante `Math.abs(playerX - currentSegment.obstacle) < 0.18` (0.10 del obstáculo + 0.08 de la mitad del coche). Las colisiones se evalúan y limpian de forma secuencial hacia atrás para evitar atravesar objetos al viajar a altas velocidades.
 
-## 5. Notas Importantes para el equipo
+## 5. Nuevas Funcionalidades
+- **Sistema de Pausa:** Presionando la tecla **P** se congela la carrera, se pausa el audio del motor y se dibuja un filtro de pantalla semitransparente con el texto "PAUSADO".
+- **Top 5 Récords Locales:** Al chocar, el juego ordena y guarda los 5 mejores puntajes utilizando `localStorage` (`nightdriver_topscores`), mostrando una tabla interactiva con el récord actual destacado.
+
+## 6. Notas Importantes para el equipo
 1. **No cargar desde el file system:** Debido a las políticas de seguridad de los navegadores (CORS), no abran `index.html` directamente. Usen un servidor local (`python3 -m http.server 8000`).
 2. **Audio:** El sistema de audio se inicializa al hacer clic en "INICIAR CARRERA" (se requiere una interacción del usuario para que el navegador desbloquee el audio).
 3. **Limpieza:** No eliminar `resetTrack()` ni `initAudio()` al inicio de `game.js`, ya que causan errores de ejecución en el motor.

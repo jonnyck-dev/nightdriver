@@ -4,6 +4,14 @@ const ctx = canvas.getContext('2d');
 canvas.width = 640;
 canvas.height = 480;
 
+// Precarga de sprites del coche
+const carCenterImg = new Image();
+carCenterImg.src = 'car_center_sprite.png';
+const carLeftImg = new Image();
+carLeftImg.src = 'car_left_sprite.png';
+const carRightImg = new Image();
+carRightImg.src = 'car_rigth_sprite.png';
+
 // Configuración
 const roadWidth = 2000;
 const segmentLength = 200;
@@ -206,15 +214,35 @@ function endGame() {
     gameActive = false;
     playCrashSound();
     
-    if (score > highScore) {
-        highScore = score;
+    let finalScore = Math.floor(score);
+    
+    // Manejo del Top 5
+    let topScores = JSON.parse(localStorage.getItem('nightdriver_topscores')) || [];
+    if (topScores.length === 0 && highScore > 0) topScores.push(Math.floor(highScore));
+    
+    topScores.push(finalScore);
+    topScores.sort((a, b) => b - a);
+    topScores = topScores.slice(0, 5);
+    localStorage.setItem('nightdriver_topscores', JSON.stringify(topScores));
+    
+    if (topScores.length > 0) {
+        highScore = topScores[0];
         localStorage.setItem('nightdriver_highscore', highScore);
     }
 
     document.getElementById('end-screen').classList.remove('hidden');
     document.getElementById('end-title').innerText = "¡COLISIÓN!";
     document.getElementById('end-title').style.color = '#f0f';
-    document.getElementById('final-stats').innerText = `SCORE FINAL: ${Math.floor(score)}\nHIGH SCORE: ${Math.floor(highScore)}`;
+    
+    let top5HTML = "<div style='margin-top: 20px; font-size: 1.1rem; color: #0ff; text-align: center; border: 1px solid #f0f; padding: 10px; background: rgba(255,0,255,0.1);'><strong>TOP 5 MUNDIAL</strong><br><br>";
+    for(let i=0; i<5; i++) {
+        let s = topScores[i] !== undefined ? topScores[i].toString().padStart(4, '0') : "----";
+        let color = (topScores[i] === finalScore && finalScore > 0) ? "#fff" : "#0ff"; // Resaltar el score actual
+        top5HTML += `<span style='color:${color};'>${i+1}. ${s}</span><br>`;
+    }
+    top5HTML += "</div>";
+
+    document.getElementById('final-stats').innerHTML = `<div style="font-size: 1.3rem;">SCORE FINAL: ${finalScore}<br>HIGH SCORE: ${Math.floor(highScore)}</div>${top5HTML}`;
     document.getElementById('msg').innerText = "EL NEÓN TE CONSUMIÓ";
 }
 
@@ -406,23 +434,45 @@ function draw() {
 }
 
 function drawPlayer(x, y) {
-    ctx.shadowBlur = 15;
-    ctx.shadowColor = "#0ff";
-    ctx.fillStyle = "#fff";
-    ctx.beginPath();
-    ctx.moveTo(x - 30, y);
-    ctx.lineTo(x + 30, y);
-    ctx.lineTo(x + 20, y - 40);
-    ctx.lineTo(x - 20, y - 40);
-    ctx.fill();
-    
-    ctx.shadowColor = "#f0f";
-    ctx.fillStyle = "#f0f";
-    ctx.fillRect(x - 25, y - 10, 15, 5);
-    ctx.fillRect(x + 10, y - 10, 15, 5);
-    ctx.shadowBlur = 0;
-}
+    let img = carCenterImg;
 
+    // Cambiar el sprite según la dirección de giro
+    if (keys['ArrowLeft']) {
+        img = carLeftImg;
+    } else if (keys['ArrowRight']) {
+        img = carRightImg;
+    }
+
+    // Tamaño óptimo (80x80px) para ajustarse a las proporciones de la carretera y obstáculos
+    const imgWidth = 80;
+    const imgHeight = 80;
+
+    // Validamos que la imagen esté completada y cargada con éxito (ancho natural > 0)
+    if (img.complete && img.naturalWidth > 0) {
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = "#0ff";
+        // Centrado horizontalmente y alineado en la base de la carretera con un pequeño ajuste vertical
+        ctx.drawImage(img, x - imgWidth / 2, y - imgHeight + 10, imgWidth, imgHeight);
+        ctx.shadowBlur = 0;
+    } else {
+        // Fallback vectorial en caso de que las imágenes no carguen (o por políticas CORS locales)
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = "#0ff";
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.moveTo(x - 30, y);
+        ctx.lineTo(x + 30, y);
+        ctx.lineTo(x + 20, y - 40);
+        ctx.lineTo(x - 20, y - 40);
+        ctx.fill();
+
+        ctx.shadowColor = "#f0f";
+        ctx.fillStyle = "#f0f";
+        ctx.fillRect(x - 25, y - 10, 15, 5);
+        ctx.fillRect(x + 10, y - 10, 15, 5);
+        ctx.shadowBlur = 0;
+    }
+}
 function gameLoop() {
     update();
     draw();
