@@ -1,0 +1,42 @@
+body {
+    margin: 0;
+    padding: 0;
+    background-color: #000;
+    color: #0f0;
+    font-family: 'Courier New', Courier, monospace;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+
+#game-container {
+    position: relative;
+    border: 2px solid #0f0;
+    box-shadow: 0 0 20px #0f0;
+}
+
+canvas {
+    display: block;
+    background: linear-gradient(to bottom, #001 0%, #001 50%, #111 50%, #111 100%);
+}
+
+#ui {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 10px;
+    border: 1px solid #0f0;
+    pointer-events: none;
+}
+
+#instructions {
+    position: absolute;
+    bottom: 10px;
+    width: 100%;
+    text-align: center;
+    font-size: 12px;
+    text-shadow: 1px 1px 2px #000;
+}
